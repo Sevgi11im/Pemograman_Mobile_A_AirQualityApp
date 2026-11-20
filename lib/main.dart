@@ -3,9 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String token = 'TOKEN';
+Future<String?> getToken() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString('waqi_token');
+}
 
 Future<Map<String, dynamic>> fetchAqi(String city) async {
+  final token = await getToken();
+
+  if (token == null || token.isEmpty) {
+    throw Exception('API token not found');
+  }
+
   final url = Uri.parse('https://api.waqi.info/feed/$city/?token=$token');
   final res = await http.get(url);
   final json = jsonDecode(res.body);
@@ -25,9 +34,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _controller = TextEditingController();
+  final _cityController = TextEditingController();
+  final _tokenController = TextEditingController();
+
   Future<Map<String, dynamic>>? _future;
-  
+
   @override
   void initState() {
     super.initState();
@@ -44,23 +55,49 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadLastCity() async {
     final prefs = await SharedPreferences.getInstance();
     final last = prefs.getString('last_city');
-    if (last != null) {
-      _controller.text = last;
+    final token = prefs.getString('waqi_token');
+
+    if (last != null && token != null && token.isNotEmpty) {
+      _cityController.text = last;
+
+      if (!mounted) return;
+
       setState(() => _future = _load(last));
     }
   }
 
+  Future<void> _saveToken() async {
+    final token = _tokenController.text.trim();
+
+    if (token.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('waqi_token', token);
+
+    _tokenController.clear();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar (
+      const SnackBar(content: Text('API token saved')),
+    );
+  }
+
   void _search() {
-    final city = _controller.text.trim();
+    final city = _cityController.text.trim();
+    
     if (city.isEmpty) return;
-    setState(() => _future = _load(city));
+    
+    setState(() {
+      _future = _load(city);
+    });
   }
 
   String _category(int aqi) {
     if (aqi <= 50) return 'Baik';
     if (aqi <= 100) return 'Sedang';
     if (aqi <= 150) return 'Tidak sehat untuk kelompok sensitif';
-    if (aqi <= 200) return 'Tidka sehat';
+    if (aqi <= 200) return 'Tidak sehat';
     if (aqi <= 300) return 'Sangat tidak sehat';
     return 'Berbahaya';
   }
@@ -68,7 +105,7 @@ class _HomePageState extends State<HomePage> {
   Color _color(int aqi) {
     if (aqi <= 50) return Colors.green;
     if (aqi <= 100) return Colors.yellow.shade700;
-    if (aqi <= 150) return Colors.orange;
+    if (aqi <= 150) return const Color.fromARGB(255, 255, 157, 0);
     if (aqi <= 200) return Colors.red;
     if (aqi <= 300) return Colors.purple;
     return Colors.brown;
@@ -82,16 +119,38 @@ class _HomePageState extends State<HomePage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+
             TextField(
-              controller: _controller,
+              controller: _tokenController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'WAQI API Token',
+                border: OutlineInputBorder(),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            ElevatedButton(
+              onPressed: _saveToken,
+              child: const Text('Save token'),
+            ),
+
+            const SizedBox(height: 24),
+
+            TextField(
+              controller: _cityController,
               decoration: const InputDecoration(labelText: 'Nama kota'),
               onSubmitted: (_) => _search(),
             ),
+
             const SizedBox(height: 8),
             ElevatedButton(onPressed: _search, child: const Text('Cari')),
             const SizedBox(height: 24),
-            if (_future == null)
-              const Text('Cari kota untuk melihat AQI')
+            if (_future == null) ...[
+              const Text('Cari kota untuk melihat AQI'),
+              const Text('Kadang kota yang di-return tidak sesuai dgn yg dicari 🙏'),
+            ]
             else
               FutureBuilder<Map<String, dynamic>>(
                 future: _future,
@@ -121,6 +180,13 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _cityController.dispose();
+    _tokenController.dispose();
+    super.dispose();
   }
 }
 
